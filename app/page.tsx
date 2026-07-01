@@ -1,13 +1,15 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 export default function HomePage() {
+  const router = useRouter();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [query, setQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  // 입력창 클릭이나 버튼 클릭 시 로그인 여부를 체크하는 함수
   const handleInteraction = () => {
     if (!isLoggedIn) {
       setIsModalOpen(true);
@@ -15,52 +17,81 @@ export default function HomePage() {
   };
 
   const handleGoogleLogin = () => {
-    // 실제 로그인 연동이 들어갈 자리 (우선 시뮬레이션을 위해 로그인 상태로 변경 후 모달 닫기)
     setIsLoggedIn(true);
     setIsModalOpen(false);
+  };
+
+  const handleLogout = () => {
+    setIsLoggedIn(false);
+    setIsDropdownOpen(false);
+    setQuery('');
   };
 
   return (
       <main className="min-h-screen bg-[#FAF6F0] text-[#3E2723] flex flex-col items-center justify-center relative font-sans p-6">
 
-        {/* 1. Auth Status Indicator (Top Right) */}
-        <div className="absolute top-8 right-8 text-right">
-          <button
-              onClick={() => {
-                if (isLoggedIn) setIsLoggedIn(false); // 로그인 상태일 땐 로그아웃 토글
-                else setIsModalOpen(true); // 비로그인 상태일 땐 로그인 모달 띄우기
-              }}
-              className="text-sm font-medium opacity-80 hover:opacity-100 transition-opacity bg-[#F0E5D8] px-3 py-1.5 rounded-full border border-[#D7C4B1]"
-              title={isLoggedIn ? "Click to logout" : "Click to login"}
-          >
-            {isLoggedIn ? (
-                <span className="text-[#A0522D] font-bold">Hello Baker A! 🧑‍🍳</span>
-            ) : (
-                <span>Hello unknown Baker 👤</span>
-            )}
-          </button>
+        <div className="absolute top-8 right-8 z-30">
+          {isLoggedIn ? (
+              <div className="relative">
+                <button
+                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                    className="text-sm font-bold bg-[#F0E5D8] px-4 py-2 rounded-full border border-[#D7C4B1] text-[#A0522D] hover:bg-[#EADCC9] transition-all shadow-sm flex items-center gap-1"
+                >
+                  Hello Baker A! 🧑‍🍳
+                </button>
+
+                {isDropdownOpen && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setIsDropdownOpen(false)} />
+
+                      <div className="absolute right-0 mt-2 w-48 bg-[#FAF6F0] border border-[#D7C4B1] rounded-xl shadow-lg py-2 z-20 text-left animate-fade-in">
+                        <button
+                            onClick={() => {
+                              setIsDropdownOpen(false);
+                              router.push('/mypage');
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm font-medium hover:bg-[#F0E5D8] text-[#4E342E] transition-colors"
+                        >
+                          📂 Go to My Page
+                        </button>
+                        <hr className="border-[#D7C4B1] my-1" />
+                        <button
+                            onClick={handleLogout}
+                            className="w-full text-left px-4 py-2.5 text-sm font-medium text-[#C62828] hover:bg-[#FFEBEE] transition-colors"
+                        >
+                          🚪 Logout
+                        </button>
+                      </div>
+                    </>
+                )}
+              </div>
+          ) : (
+              <button
+                  onClick={() => setIsModalOpen(true)}
+                  className="text-sm font-medium opacity-80 hover:opacity-100 transition-opacity bg-[#F0E5D8] px-3 py-1.5 rounded-full border border-[#D7C4B1]"
+              >
+                Hello unknown Baker 👤
+              </button>
+          )}
         </div>
 
-        {/* Main Content Area */}
-        <div className="w-full max-w-md text-center flex flex-col items-center gap-8">
+        <div className="w-full max-w-md text-center flex flex-col items-center gap-8 relative z-0">
 
-          {/* 2. Main Title */}
           <h1 className="text-6xl font-extrabold tracking-tight select-none drop-shadow-sm text-[#4E342E]">
             News <span className="text-[#C68B59]">Cookie</span>
           </h1>
 
-          {/* 3. Query Field Section (Always visible identically) */}
           <div className="w-full flex flex-col gap-3">
             <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                onClick={handleInteraction} // 비로그인이면 클릭 시 모달 오픈
+                onClick={handleInteraction}
                 placeholder="What kind of cookie do you want to bake? Enter your query..."
                 className="w-full px-5 py-4 rounded-xl bg-white border-2 border-[#D7C4B1] text-[#3E2723] placeholder-[#A1887F] focus:outline-none focus:border-[#C68B59] focus:ring-2 focus:ring-[#C68B59]/20 transition-all shadow-inner text-base"
             />
             <button
-                onClick={handleInteraction} // 비로그인이면 클릭 시 모달 오픈
+                onClick={handleInteraction}
                 className="w-full bg-[#C68B59] text-white font-bold py-4 rounded-xl hover:bg-[#B37A49] active:scale-[0.99] transition-all shadow-md"
             >
               Bake your Cookie 🍪
@@ -69,27 +100,19 @@ export default function HomePage() {
 
         </div>
 
-        {/* ==========================================
-          4. Google Login Modal (Sign in modal)
-         ========================================== */}
         {isModalOpen && (
-            <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
-              {/* 모달 바깥 영역 클릭 시 닫기 */}
+            <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="absolute inset-0" onClick={() => setIsModalOpen(false)} />
-
-              {/* 모달 콘텐츠 박스 */}
-              <div className="bg-[#FAF6F0] border-2 border-[#D7C4B1] p-8 rounded-2xl max-w-xs w-full text-center shadow-2xl relative z-10 flex flex-col items-center gap-6 animate-scale-up">
+              <div className="bg-[#FAF6F0] border-2 border-[#D7C4B1] p-8 rounded-2xl max-w-xs w-full text-center shadow-2xl relative z-10 flex flex-col items-center gap-6">
                 <div>
                   <h2 className="text-xl font-bold text-[#4E342E] mb-1">Start Baking!</h2>
                   <p className="text-xs text-[#8D6E63]">Please sign in to customize your News Cookie</p>
                 </div>
 
-                {/* Google Login Button */}
                 <button
                     onClick={handleGoogleLogin}
                     className="w-full flex items-center justify-center gap-3 bg-white text-gray-700 font-semibold py-3 px-4 border border-gray-300 rounded-xl shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all text-sm"
                 >
-                  {/* 간단한 구글 G 로고 SVG */}
                   <svg className="w-5 h-5" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                     <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -99,11 +122,7 @@ export default function HomePage() {
                   <span>Login with Google</span>
                 </button>
 
-                {/* Cancel Button */}
-                <button
-                    onClick={() => setIsModalOpen(false)}
-                    className="text-xs text-[#8D6E63] hover:underline"
-                >
+                <button onClick={() => setIsModalOpen(false)} className="text-xs text-[#8D6E63] hover:underline">
                   Maybe later
                 </button>
               </div>
