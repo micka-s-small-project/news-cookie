@@ -1,28 +1,48 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { supabase } from "@/src/utils/supabase";
 
 type StepType = 'INPUT' | 'BAKING' | 'RESULTS';
 
 export default function HomePage() {
-  const router = useRouter();
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [userEmail, setUserEmail] = useState('');
+  const [userId, setUserId] = useState('');
   const [query, setQuery] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
   const [step, setStep] = useState<StepType>('INPUT');
-  const [tokens, setTokens] = useState(0);
+  const [tokens, setTokens] = useState(0); // number 타입
   const [isWaitlistModalOpen, setIsWaitlistModalOpen] = useState(false);
 
   const [hasVoted, setHasVoted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [isResultOpen, setIsResultOpen] = useState(false);
-  const [selectedCookieData, setSelectedCookieData] = useState<any>(null);
+  const feedbackEmail = "micka.vocal@gmail.com";
+  const mailSubject = encodeURIComponent("[News Cookie] Feedback & Suggestions");
+  const mailBody = encodeURIComponent("Hello Chef!\n\nHere is my feedback about News Cookie:\n\n");
 
-  // 컴포넌트가 마운트될 때 기존 투표 이력이 있는지 LocalStorage 확인
+  // 토큰 가져오는 함수 수정
+  const fetchUserTokens = async (uid: string) => {
+    try {
+      const { data, error } = await supabase
+      .from('users')
+      .select('cookie_token')
+      .eq('id', uid)
+      .single();
+
+      if (error) throw error;
+
+      if (data) {
+        const tokenCount = data.cookie_token ? Number(data.cookie_token) : 0;
+        setTokens(tokenCount);
+      }
+    } catch (error) {
+      console.error('Error fetching user tokens:', error);
+    }
+  };
+
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const voted = localStorage.getItem('news_cookie_voted_waitlist');
@@ -32,9 +52,37 @@ export default function HomePage() {
     }
   }, []);
 
-  const feedbackEmail = "edsolarrcnt5@gmail.com";
-  const mailSubject = encodeURIComponent("[News Cookie] Feedback & Suggestions");
-  const mailBody = encodeURIComponent("Hello Chef!\n\nHere is my feedback about News Cookie:\n\n");
+  // 하나의 useEffect로 인증 상태 및 토큰 조회 통합 관리
+  useEffect(() => {
+    // 초기 세션 확인
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setIsLoggedIn(true);
+        setUserEmail(session.user.email || '');
+        setUserId(session.user.id);
+        fetchUserTokens(session.user.id); // 로그인 정보가 있다면 즉시 DB 값 조회
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setIsLoggedIn(true);
+        setUserEmail(session.user.email || '');
+        setUserId(session.user.id);
+        fetchUserTokens(session.user.id); // 상태가 바뀔 때도 DB 동기화
+      } else {
+        setIsLoggedIn(false);
+        setUserEmail('');
+        setUserId('');
+        setTokens(0);
+        setStep('INPUT');
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  // ⚠️ [삭제됨] 하드코딩으로 setTokens(3) 하던 두 번째 useEffect 제거
 
   const mockRefinedCookies = [
     { id: 1, shapeClass: "bg-[#8D6E63]", clipPath: "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)", text: "🔍 Analyze the core impact of recent tech changes with a timeline." },
@@ -60,112 +108,82 @@ export default function HomePage() {
     }, 1500);
   };
 
-  const handleSelectQuery = (cookie: any) => {
+  const handleSelectQuery = (refinedText: string) => {
     if (tokens >= 1) {
       setTokens((prev) => prev - 1);
-      setSelectedCookieData(cookie);
-      setIsResultOpen(true);
+      alert(`🍪 [1 Token Used!] Opening result for:\n"${refinedText}"`);
     } else {
       setIsWaitlistModalOpen(true);
     }
   };
 
-  // ★ NEW: 수요 조사 투표 제출 핸들러 (중복 차감/요청 방지 완벽 방어)
   const handleWaitlistSubmit = async () => {
     if (hasVoted || isSubmitting) return;
-
     setIsSubmitting(true);
 
-    // 가상의 네트워크 네트워크 통신 타임아웃 구현 (추후 Supabase DB 연동용)
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 600));
 
-    // 로컬스토리지에 저장하여 브라우저가 기억하도록 설정
-    localStorage.setItem('news_cookie_voted_waitlist', 'true');
-    setHasVoted(true);
-    setIsSubmitting(false);
-
-    alert("💖 Thank you for voting! Your valuable interest speeds up our official launch.");
-    setIsWaitlistModalOpen(false);
+      localStorage.setItem('news_cookie_voted_waitlist', 'true');
+      setHasVoted(true);
+      alert("💖 Thank you for voting! Your interest speeds up our official launch.");
+      setIsWaitlistModalOpen(false);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleGoogleLogin = () => {
-    setIsLoggedIn(true);
-    setTokens(3);
-    setIsModalOpen(false);
-    alert("🎉 Welcome! 3 free baking tokens have been added to your pantry.");
+  const handleGoogleLogin = async () => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${window.location.origin}` },
+      });
+      if (error) throw error;
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsModalOpen(false);
+    }
   };
 
-  const handleLogout = () => {
-    setIsLoggedIn(false);
-    setIsDropdownOpen(false);
-    setQuery('');
-    setTokens(0);
-    setStep('INPUT');
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   return (
       <main className="min-h-screen bg-[#FAF6F0] text-[#3E2723] flex flex-col items-center justify-between font-sans p-6 relative">
-
-        {/* 상단바 */}
         <div className="w-full max-w-3xl flex justify-end items-center z-30 pt-2">
-          {isLoggedIn && (
-              <div className="text-xs font-bold bg-[#EADCC9] px-3 py-1.5 rounded-full text-[#5D4037] select-none mr-3">
-                ⚡ Pantry: <span className="text-[#C68B59] font-black">{tokens}</span> EA
-              </div>
-          )}
-
           {isLoggedIn ? (
-              <div className="relative">
-                <button
-                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                    className="text-sm font-bold bg-[#F0E5D8] px-4 py-2 rounded-full border border-[#D7C4B1] text-[#A0522D] hover:bg-[#EADCC9] transition-all shadow-sm flex items-center gap-1"
-                >
-                  Hello Baker A! 🧑‍🍳
-                </button>
-
-                {isDropdownOpen && (
-                    <>
-                      <div className="fixed inset-0 z-10" onClick={() => setIsDropdownOpen(false)} />
-
-                      <div className="absolute right-0 mt-2 w-48 bg-[#FAF6F0] border border-[#D7C4B1] rounded-xl shadow-lg py-2 z-20 text-left animate-fade-in">
-                        <button
-                            onClick={() => {
-                              setIsDropdownOpen(false);
-                              router.push('/mypage');
-                            }}
-                            className="w-full text-left px-4 py-2.5 text-sm font-medium hover:bg-[#F0E5D8] text-[#4E342E] transition-colors"
-                        >
-                          📂 Go to My Page
-                        </button>
-                        <hr className="border-[#D7C4B1] my-1" />
-                        <button
-                            onClick={handleLogout}
-                            className="w-full text-left px-4 py-2.5 text-sm font-medium text-[#C62828] hover:bg-[#FFEBEE] transition-colors"
-                        >
-                          🚪 Logout
-                        </button>
-                      </div>
-                    </>
-                )}
+              <div className="flex items-center gap-3 animate-fade-in">
+                <div className="text-xs font-bold bg-[#EADCC9] px-3 py-1.5 rounded-full text-[#5D4037] select-none">
+                  ⚡ Pantry: <span className="text-[#C68B59] font-black">{tokens}</span> EA
+                </div>
+                <div className="text-sm font-bold bg-[#F0E5D8] px-4 py-2 rounded-full border border-[#D7C4B1] text-[#A0522D] shadow-sm flex items-center gap-2">
+                  <span>{userEmail.split('@')[0]} 🧑‍🍳</span>
+                  <button onClick={handleLogout} className="text-[11px] text-red-600 hover:underline font-normal ml-1">
+                    Logout
+                  </button>
+                </div>
               </div>
           ) : (
-              <button
-                  onClick={() => setIsModalOpen(true)}
-                  className="text-sm font-medium opacity-80 hover:opacity-100 transition-opacity bg-[#F0E5D8] px-3 py-1.5 rounded-full border border-[#D7C4B1]"
-              >
+              <button onClick={() => setIsModalOpen(true)} className="text-sm font-medium opacity-80 hover:opacity-100 transition-opacity bg-[#F0E5D8] px-3 py-1.5 rounded-full border border-[#D7C4B1]">
                 Hello unknown Baker 👤
               </button>
           )}
         </div>
 
-        {/* 메인 뷰 */}
         <div className={`w-full text-center flex flex-col items-center gap-8 relative z-0 my-auto transition-all duration-300 ${step === 'RESULTS' ? 'max-w-3xl' : 'max-w-md'}`}>
-
           <h1 className="text-6xl font-extrabold tracking-tight select-none drop-shadow-sm text-[#4E342E]">
             News <span className="text-[#C68B59]">Cookie</span>
           </h1>
 
-          {/* STEP 1: INPUT */}
           {step === 'INPUT' && (
               <div className="w-full flex flex-col gap-3 animate-fade-in">
                 <input
@@ -176,16 +194,12 @@ export default function HomePage() {
                     placeholder="What kind of cookie do you want to bake? Enter your query..."
                     className="w-full px-5 py-4 rounded-xl bg-white border-2 border-[#D7C4B1] text-[#3E2723] placeholder-[#A1887F] focus:outline-none focus:border-[#C68B59] focus:ring-2 focus:ring-[#C68B59]/20 transition-all shadow-inner text-base"
                 />
-                <button
-                    onClick={handleBakeSubmit}
-                    className="w-full bg-[#C68B59] text-white font-bold py-4 rounded-xl hover:bg-[#B37A49] active:scale-[0.99] transition-all shadow-md"
-                >
+                <button onClick={handleBakeSubmit} className="w-full bg-[#C68B59] text-white font-bold py-4 rounded-xl hover:bg-[#B37A49] active:scale-[0.99] transition-all shadow-md">
                   Bake your Cookie 🍪
                 </button>
               </div>
           )}
 
-          {/* STEP 2: BAKING */}
           {step === 'BAKING' && (
               <div className="py-6 text-center space-y-4 animate-pulse">
                 <span className="text-5xl inline-block animate-spin duration-1000">⏳</span>
@@ -194,7 +208,6 @@ export default function HomePage() {
               </div>
           )}
 
-          {/* STEP 3: RESULTS */}
           {step === 'RESULTS' && (
               <div className="w-full flex flex-col gap-6 animate-scale-up">
                 <div className="text-center">
@@ -204,71 +217,35 @@ export default function HomePage() {
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
                   {mockRefinedCookies.map((cookie, index) => (
-                      <button
-                          key={cookie.id}
-                          onClick={() => handleSelectQuery(cookie.text)}
-                          className="bg-white border-2 border-[#D7C4B1] rounded-3xl p-6 flex flex-col items-center hover:border-[#C68B59] hover:bg-[#FFFDFB] transition-all active:scale-[0.98] shadow-sm hover:shadow-md group"
-                      >
+                      <button key={cookie.id} onClick={() => handleSelectQuery(cookie.text)} className="bg-white border-2 border-[#D7C4B1] rounded-3xl p-6 flex flex-col items-center hover:border-[#C68B59] hover:bg-[#FFFDFB] transition-all active:scale-[0.98] shadow-sm hover:shadow-md group">
                         <div className="w-24 h-24 flex items-center justify-center relative mb-6">
-                          <div
-                              className={`w-20 h-20 ${cookie.shapeClass} opacity-90 group-hover:scale-105 transition-transform duration-300 shadow-sm`}
-                              style={{ clipPath: cookie.clipPath }}
-                          />
+                          <div className={`w-20 h-20 ${cookie.shapeClass} opacity-90 group-hover:scale-105 transition-transform duration-300 shadow-sm`} style={{ clipPath: cookie.clipPath }} />
                           <div className="absolute top-[35%] left-[35%] w-2 h-2 bg-[#3e1e11] rounded-full opacity-60" />
                           <div className="absolute top-[55%] left-[55%] w-2.5 h-2.5 bg-[#2c1308] rounded-full opacity-70" />
                           <div className="absolute top-[60%] left-[30%] w-2 h-2 bg-[#3e1e11] rounded-full opacity-60" />
                         </div>
-
                         <div className="w-full text-center border-t border-[#FAF6F0] pt-4 flex flex-col gap-1">
                           <span className="text-[10px] font-bold text-[#C68B59] uppercase">Shape Option 0{index + 1}</span>
-                          <p className="text-xs font-semibold text-[#3E2723] leading-relaxed line-clamp-3">
-                            {cookie.text}
-                          </p>
+                          <p className="text-xs font-semibold text-[#3E2723] leading-relaxed line-clamp-3">{cookie.text}</p>
                         </div>
                       </button>
                   ))}
                 </div>
 
-                <div className={`w-full overflow-hidden transition-all duration-700 ease-in-out ${isResultOpen ? 'max-h-[800px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                  <div className="bg-[#FFFDF9] border-2 border-[#EADCC9] rounded-3xl p-8 mt-6 shadow-xl text-left">
-                    <div className="flex justify-between items-center mb-6">
-                      <h3 className="text-2xl font-black text-[#3E2723]">🍪 Your Result is Ready!</h3>
-                      <button onClick={() => setIsResultOpen(false)} className="text-[#8D6E63] font-bold">Close</button>
-                    </div>
-
-                    <div className="bg-[#FAF6F0] p-6 rounded-2xl border border-[#EADCC9] text-sm text-[#5D4037] leading-relaxed">
-                      <p className="font-bold mb-2">💡 Analysis Content:</p>
-                      <p>{selectedCookieData?.text}</p>
-                      <p className="mt-4 italic text-[#C68B59] font-medium">— Enjoy your freshly baked news!</p>
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                    onClick={() => { setQuery(''); setStep('INPUT'); setIsResultOpen(false); }}
-                    className="text-xs text-[#8D6E63] hover:underline text-center mt-2"
-                >
+                <button onClick={() => { setQuery(''); setStep('INPUT'); }} className="text-xs text-[#8D6E63] hover:underline text-center mt-2">
                   ← Back to Prep Bench
                 </button>
               </div>
           )}
-
         </div>
 
-        {/* 푸터 영역 */}
         <footer className="w-full max-w-3xl text-center pt-8 pb-2 border-t border-[#EADCC9] text-xs text-[#8D6E63] font-medium flex flex-col sm:flex-row justify-between items-center gap-2 relative z-10">
           <p>© 2026 News Cookie. All rights reserved.</p>
-          <div className="flex gap-4">
-            <a
-                href={`mailto:${feedbackEmail}?subject=${mailSubject}&body=${mailBody}`}
-                className="text-[#C68B59] hover:text-[#B37A49] font-bold transition-colors underline underline-offset-4 flex items-center gap-1"
-            >
-              💬 Send Us Feedback
-            </a>
-          </div>
+          <a href={`mailto:${feedbackEmail}?subject=${mailSubject}&body=${mailBody}`} className="text-[#C68B59] hover:text-[#B37A49] font-bold transition-colors underline underline-offset-4">
+            💬 Send Us Feedback
+          </a>
         </footer>
 
-        {/* 구글 로그인 모달 */}
         {isModalOpen && (
             <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="absolute inset-0" onClick={() => setIsModalOpen(false)} />
@@ -277,11 +254,7 @@ export default function HomePage() {
                   <h2 className="text-xl font-bold text-[#4E342E] mb-1">Start Baking!</h2>
                   <p className="text-xs text-[#8D6E63]">Please sign in to get 3 FREE starter tokens</p>
                 </div>
-
-                <button
-                    onClick={handleGoogleLogin}
-                    className="w-full flex items-center justify-center gap-3 bg-white text-gray-700 font-semibold py-3 px-4 border border-gray-300 rounded-xl shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all text-sm"
-                >
+                <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white text-gray-700 font-semibold py-3 px-4 border border-gray-300 rounded-xl shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all text-sm">
                   <svg className="w-5 h-5" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                     <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -290,19 +263,14 @@ export default function HomePage() {
                   </svg>
                   <span>Login with Google</span>
                 </button>
-
-                <button onClick={() => setIsModalOpen(false)} className="text-xs text-[#8D6E63] hover:underline">
-                  Maybe later
-                </button>
+                <button onClick={() => setIsModalOpen(false)} className="text-xs text-[#8D6E63] hover:underline">Maybe later</button>
               </div>
             </div>
         )}
 
-        {/* 무료 토큰 소진 에러 팝업 (중복 방지 버튼 UI 고도화 반영) */}
         {isWaitlistModalOpen && (
             <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
               <div className="absolute inset-0" onClick={() => setIsWaitlistModalOpen(false)} />
-
               <div className="bg-[#FAF6F0] border-2 border-[#D7C4B1] p-6 rounded-3xl max-w-sm w-full shadow-2xl relative z-10 flex flex-col gap-4 text-center items-center">
                 <span className="text-4xl">🔋</span>
                 <div>
@@ -312,36 +280,13 @@ export default function HomePage() {
                     We are currently polishing additional features. Leave your feedback to help us grow!
                   </p>
                 </div>
-
-                {/* 중복 클릭 방지 핸들러 바인딩 및 버튼 상호작용 스타일 적용 */}
-                <button
-                    onClick={handleWaitlistSubmit}
-                    disabled={hasVoted || isSubmitting}
-                    className={`w-full font-bold py-3 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-1 ${
-                        hasVoted
-                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                            : 'bg-[#66BB6A] hover:bg-[#57A75B] text-white active:scale-[0.99]'
-                    }`}
-                >
-                  {isSubmitting ? (
-                      <span>Submitting...</span>
-                  ) : hasVoted ? (
-                      <span>✓ Already Submitted! Thanks!</span>
-                  ) : (
-                      <span>I want more tokens! 👍</span>
-                  )}
+                <button onClick={handleWaitlistSubmit} disabled={hasVoted || isSubmitting} className={`w-full font-bold py-3 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-1 ${hasVoted ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#66BB6A] hover:bg-[#57A75B] text-white active:scale-[0.99]'}`}>
+                  {isSubmitting ? <span>Submitting...</span> : hasVoted ? <span>✓ Already Submitted! Thanks!</span> : <span>I want more tokens! 👍</span>}
                 </button>
-
-                <button
-                    onClick={() => setIsWaitlistModalOpen(false)}
-                    className="text-xs text-[#8D6E63] hover:underline"
-                >
-                  Close
-                </button>
+                <button onClick={() => setIsWaitlistModalOpen(false)} className="text-xs text-[#8D6E63] hover:underline">Close</button>
               </div>
             </div>
         )}
-
       </main>
   );
 }
