@@ -1,9 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from "@/src/utils/supabase";
 
 type StepType = 'INPUT' | 'BAKING' | 'RESULTS';
+
+interface CookieOption {
+  id: number;
+  shapeClass: string;
+  clipPath: string;
+  text: string;
+}
 
 export default function HomePage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -13,17 +20,29 @@ export default function HomePage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const [step, setStep] = useState<StepType>('INPUT');
-  const [tokens, setTokens] = useState(0); // number 타입
+  const [tokens, setTokens] = useState(0);
   const [isWaitlistModalOpen, setIsWaitlistModalOpen] = useState(false);
 
   const [hasVoted, setHasVoted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // 🌟 추가된 상태 (실제 서비스 시 API 결과 데이터를 담을 곳)
+  const [cookies, setCookies] = useState<CookieOption[]>([]);
+  // 🌟 추가된 상태 (선택된 쿠키의 상세 분석 결과 상태)
+  const [selectedCookieText, setSelectedCookieText] = useState<string | null>(null);
+  const [isTasting, setIsTasting] = useState(false);
+  const detailRef = useRef<HTMLDivElement>(null);
+
   const feedbackEmail = "micka.vocal@gmail.com";
   const mailSubject = encodeURIComponent("[News Cookie] Feedback & Suggestions");
   const mailBody = encodeURIComponent("Hello Chef!\n\nHere is my feedback about News Cookie:\n\n");
 
-  // 토큰 가져오는 함수 수정
+  const mockData: CookieOption[] = [
+    { id: 1, shapeClass: "bg-[#8D6E63]", clipPath: "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)", text: "🔍 Analyze the core impact of recent tech changes with a timeline." },
+    { id: 2, shapeClass: "bg-[#C68B59]", clipPath: "circle(50% at 50% 50%)", text: "💡 Summarize the industry pros and cons in a simple 3-line breakdown." },
+    { id: 3, shapeClass: "bg-[#D7A15C]", clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)", text: "📊 Extract visual statistics and data points from this trend." }
+  ];
+
   const fetchUserTokens = async (uid: string) => {
     try {
       const { data, error } = await supabase
@@ -33,10 +52,8 @@ export default function HomePage() {
       .single();
 
       if (error) throw error;
-
       if (data) {
-        const tokenCount = data.cookie_token ? Number(data.cookie_token) : 0;
-        setTokens(tokenCount);
+        setTokens(data.cookie_token ? Number(data.cookie_token) : 0);
       }
     } catch (error) {
       console.error('Error fetching user tokens:', error);
@@ -46,21 +63,17 @@ export default function HomePage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const voted = localStorage.getItem('news_cookie_voted_waitlist');
-      if (voted === 'true') {
-        setHasVoted(true);
-      }
+      if (voted === 'true') setHasVoted(true);
     }
   }, []);
 
-  // 하나의 useEffect로 인증 상태 및 토큰 조회 통합 관리
   useEffect(() => {
-    // 초기 세션 확인
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setIsLoggedIn(true);
         setUserEmail(session.user.email || '');
         setUserId(session.user.id);
-        fetchUserTokens(session.user.id); // 로그인 정보가 있다면 즉시 DB 값 조회
+        fetchUserTokens(session.user.id);
       }
     });
 
@@ -69,26 +82,19 @@ export default function HomePage() {
         setIsLoggedIn(true);
         setUserEmail(session.user.email || '');
         setUserId(session.user.id);
-        fetchUserTokens(session.user.id); // 상태가 바뀔 때도 DB 동기화
+        fetchUserTokens(session.user.id);
       } else {
         setIsLoggedIn(false);
         setUserEmail('');
         setUserId('');
         setTokens(0);
         setStep('INPUT');
+        setSelectedCookieText(null);
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
-
-  // ⚠️ [삭제됨] 하드코딩으로 setTokens(3) 하던 두 번째 useEffect 제거
-
-  const mockRefinedCookies = [
-    { id: 1, shapeClass: "bg-[#8D6E63]", clipPath: "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)", text: "🔍 Analyze the core impact of recent tech changes with a timeline." },
-    { id: 2, shapeClass: "bg-[#C68B59]", clipPath: "circle(50% at 50% 50%)", text: "💡 Summarize the industry pros and cons in a simple 3-line breakdown." },
-    { id: 3, shapeClass: "bg-[#D7A15C]", clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)", text: "📊 Extract visual statistics and data points from this trend." }
-  ];
 
   const handleInteraction = () => {
     if (!isLoggedIn) {
@@ -103,27 +109,60 @@ export default function HomePage() {
     if (!query.trim()) return;
 
     setStep('BAKING');
+    setSelectedCookieText(null); // 이전 결과 초기화
+
     setTimeout(() => {
+      setCookies(mockData); // 나중에 실제 API Response 데이터로 대체됩니다.
       setStep('RESULTS');
     }, 1500);
   };
 
-  const handleSelectQuery = (refinedText: string) => {
-    if (tokens >= 1) {
-      setTokens((prev) => prev - 1);
-      alert(`🍪 [1 Token Used!] Opening result for:\n"${refinedText}"`);
-    } else {
+  // 🌟 [수정] Supabase 연동 토큰 차감 및 하단 슬라이드 로직
+  const handleSelectQuery = async (refinedText: string) => {
+    if (tokens < 1) {
       setIsWaitlistModalOpen(true);
+      return;
+    }
+
+    setIsTasting(true);
+    setSelectedCookieText(null); // 새로운 쿠키를 맛볼 때 기존 하단 뷰 초기화
+
+    try {
+      // 1. Supabase DB에서 토큰 1개 차감
+      const nextTokenCount = tokens - 1;
+      const { error } = await supabase
+      .from('users')
+      .update({ cookie_token: nextTokenCount })
+      .eq('id', userId);
+
+      if (error) throw error;
+
+      // 2. 로컬 상태 업데이트
+      setTokens(nextTokenCount);
+
+      // 3. 맛보기 애니메이션 연출 (약 1초 대기 후 하단 결과 오픈)
+      setTimeout(() => {
+        setIsTasting(false);
+        setSelectedCookieText(refinedText);
+
+        // 4. 오픈된 결과창으로 부드럽게 스크롤 이동
+        setTimeout(() => {
+          detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+      }, 1000);
+
+    } catch (error) {
+      console.error('Error deducting token:', error);
+      alert('Failed to consume token. Please try again.');
+      setIsTasting(false);
     }
   };
 
   const handleWaitlistSubmit = async () => {
     if (hasVoted || isSubmitting) return;
     setIsSubmitting(true);
-
     try {
       await new Promise((resolve) => setTimeout(resolve, 600));
-
       localStorage.setItem('news_cookie_voted_waitlist', 'true');
       setHasVoted(true);
       alert("💖 Thank you for voting! Your interest speeds up our official launch.");
@@ -158,7 +197,7 @@ export default function HomePage() {
   };
 
   return (
-      <main className="min-h-screen bg-[#FAF6F0] text-[#3E2723] flex flex-col items-center justify-between font-sans p-6 relative">
+      <main className="min-h-screen bg-[#FAF6F0] text-[#3E2723] flex flex-col items-center justify-between font-sans p-6 relative transition-all duration-500">
         <div className="w-full max-w-3xl flex justify-end items-center z-30 pt-2">
           {isLoggedIn ? (
               <div className="flex items-center gap-3 animate-fade-in">
@@ -215,9 +254,16 @@ export default function HomePage() {
                   <h3 className="text-2xl font-black text-[#4E342E] mt-0.5">Select one cookie shape to taste</h3>
                 </div>
 
+                {/* 맛보는 중(토큰 차감 대기 상태) 스피너 */}
+                {isTasting && (
+                    <div className="w-full py-4 bg-[#EADCC9]/30 rounded-xl text-sm font-medium text-[#5D4037] animate-pulse flex items-center justify-center gap-2">
+                      <span>🍪 Crunch, crunch... Tasting your selected cookie shape...</span>
+                    </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
-                  {mockRefinedCookies.map((cookie, index) => (
-                      <button key={cookie.id} onClick={() => handleSelectQuery(cookie.text)} className="bg-white border-2 border-[#D7C4B1] rounded-3xl p-6 flex flex-col items-center hover:border-[#C68B59] hover:bg-[#FFFDFB] transition-all active:scale-[0.98] shadow-sm hover:shadow-md group">
+                  {cookies.map((cookie, index) => (
+                      <button key={cookie.id} disabled={isTasting} onClick={() => handleSelectQuery(cookie.text)} className="bg-white border-2 border-[#D7C4B1] rounded-3xl p-6 flex flex-col items-center hover:border-[#C68B59] hover:bg-[#FFFDFB] transition-all active:scale-[0.98] shadow-sm hover:shadow-md group disabled:opacity-60 disabled:cursor-not-allowed">
                         <div className="w-24 h-24 flex items-center justify-center relative mb-6">
                           <div className={`w-20 h-20 ${cookie.shapeClass} opacity-90 group-hover:scale-105 transition-transform duration-300 shadow-sm`} style={{ clipPath: cookie.clipPath }} />
                           <div className="absolute top-[35%] left-[35%] w-2 h-2 bg-[#3e1e11] rounded-full opacity-60" />
@@ -232,7 +278,28 @@ export default function HomePage() {
                   ))}
                 </div>
 
-                <button onClick={() => { setQuery(''); setStep('INPUT'); }} className="text-xs text-[#8D6E63] hover:underline text-center mt-2">
+                {/* 🌟 하단 슬라이드로 나타나는 결과 디테일 뷰 영역 */}
+                <div
+                    ref={detailRef}
+                    className={`w-full overflow-hidden transition-all duration-500 ease-in-out ${selectedCookieText ? 'max-h-[500px] opacity-100 mt-4' : 'max-h-0 opacity-0'}`}
+                >
+                  <div className="bg-white border-2 border-[#C68B59] rounded-2xl p-6 text-left shadow-lg relative bg-[radial-gradient(#FAF6F0_1px,transparent_1px)] [background-size:16px_16px]">
+                    <div className="absolute top-3 right-3 bg-[#C68B59] text-white font-bold text-[10px] px-2 py-0.5 rounded">
+                      TASTED 🍪
+                    </div>
+                    <h4 className="font-extrabold text-[#4E342E] text-base mb-2 flex items-center gap-1.5">
+                      <span>🍽️</span> Bake Reulst!
+                    </h4>
+                    <p className="text-sm bg-[#FAF6F0] text-[#3E2723] p-4 rounded-xl border border-[#D7C4B1] leading-relaxed font-mono whitespace-pre-wrap">
+                      {selectedCookieText}
+                    </p>
+                    <p className="text-[11px] text-[#8D6E63] mt-3 italic text-right">
+                      * 1 Token has been securely deducted from your Pantry.
+                    </p>
+                  </div>
+                </div>
+
+                <button onClick={() => { setQuery(''); setStep('INPUT'); setSelectedCookieText(null); }} className="text-xs text-[#8D6E63] hover:underline text-center mt-2">
                   ← Back to Prep Bench
                 </button>
               </div>
@@ -246,6 +313,7 @@ export default function HomePage() {
           </a>
         </footer>
 
+        {/* ... (이하 로그인 및 웨이트리스 모달 코드는 기존과 동일) ... */}
         {isModalOpen && (
             <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="absolute inset-0" onClick={() => setIsModalOpen(false)} />
