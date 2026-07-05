@@ -3,12 +3,13 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from "@/src/utils/supabase";
 import ReactMarkdown from 'react-markdown';
+import Link from 'next/link'; // 🌟 마이페이지 이동용 링크 임포트
 
 type StepType = 'INPUT' | 'BAKING' | 'RESULTS';
 
 interface CookieOption {
   id: number;
-  shape: 'SQUARE' | 'CIRCLE' | 'HEXAGON'; // API 명세와 일치시킴
+  shape: 'SQUARE' | 'CIRCLE' | 'HEXAGON';
   shapeClass: string;
   clipPath: string;
   text: string;
@@ -28,13 +29,14 @@ export default function HomePage() {
   const [hasVoted, setHasVoted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 🌟 Gemini API로부터 받아온 3가지 쿠키 옵션을 저장할 상태
   const [cookies, setCookies] = useState<CookieOption[]>([]);
-
-  // 선택된 쿠키의 상세 결과를 보여줄 상태들
   const [selectedCookieText, setSelectedCookieText] = useState<string | null>(null);
   const [isTasting, setIsTasting] = useState(false);
   const detailRef = useRef<HTMLDivElement>(null);
+
+  // 🌟 마이페이지 이동 드롭다운 토글 및 참조 상태 추가
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const feedbackEmail = "edsolarrcnt5@gmail.com";
   const mailSubject = encodeURIComponent("[News Cookie] Feedback & Suggestions");
@@ -43,19 +45,21 @@ export default function HomePage() {
   const [sources, setSources] = useState<{ title: string; url: string }[]>([]);
 
   const shapeDesignMap = {
-    SQUARE: {
-      shapeClass: "bg-[#8D6E63]",
-      clipPath: "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)", // 오각형 스퀘어 느낌
-    },
-    CIRCLE: {
-      shapeClass: "bg-[#C68B59]",
-      clipPath: "circle(50% at 50% 50%)",
-    },
-    HEXAGON: {
-      shapeClass: "bg-[#D7A15C]",
-      clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
-    }
+    SQUARE: { shapeClass: "bg-[#8D6E63]", clipPath: "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)" },
+    CIRCLE: { shapeClass: "bg-[#C68B59]", clipPath: "circle(50% at 50% 50%)" },
+    HEXAGON: { shapeClass: "bg-[#D7A15C]", clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)" }
   };
+
+  // 외부 영역 클릭 시 유저 드롭다운 메뉴 닫기 트리거
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const fetchUserTokens = async (uid: string) => {
     try {
@@ -104,6 +108,7 @@ export default function HomePage() {
         setTokens(0);
         setStep('INPUT');
         setSelectedCookieText(null);
+        setIsDropdownOpen(false);
       }
     });
 
@@ -118,7 +123,6 @@ export default function HomePage() {
     return true;
   };
 
-  // 🌟 [수정] 진짜 Gemini API 오븐을 호출하는 로직
   const handleBakeSubmit = async () => {
     if (!handleInteraction()) return;
     if (!query.trim()) return;
@@ -141,12 +145,7 @@ export default function HomePage() {
 
       const bakedCookies: CookieOption[] = result.data.map((item: any) => {
         const design = shapeDesignMap[item.shape as 'SQUARE' | 'CIRCLE' | 'HEXAGON'] || shapeDesignMap.CIRCLE;
-        return {
-          id: item.id,
-          shape: item.shape,
-          text: item.text,
-          ...design
-        };
+        return { id: item.id, shape: item.shape, text: item.text, ...design };
       });
 
       setCookies(bakedCookies);
@@ -159,6 +158,7 @@ export default function HomePage() {
     }
   };
 
+  // 🌟 [수정 연동 완료] 토큰 차감 + 안전한 DB 적재 완료 파이프라인
   const handleSelectQuery = async (cookieItem: CookieOption) => {
     if (tokens < 1) {
       setIsWaitlistModalOpen(true);
@@ -167,9 +167,10 @@ export default function HomePage() {
 
     setIsTasting(true);
     setSelectedCookieText(null);
-    setSources([]); // 이전 출처 UI 초기화
+    setSources([]);
 
     try {
+      // 1. Supabase에서 토큰 1개 차감
       const nextTokenCount = tokens - 1;
       const { error: tokenError } = await supabase
       .from('users')
@@ -179,6 +180,7 @@ export default function HomePage() {
       if (tokenError) throw tokenError;
       setTokens(nextTokenCount);
 
+      // 2. Tavily + LangChain API 호출
       const response = await fetch('/api/taste', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -191,6 +193,12 @@ export default function HomePage() {
         throw new Error(data.error || 'Failed to fetch taste analysis');
       }
 
+      // 🌟 [안전 가공] jsonb 필드에 데이터가 씹히지 않도록 확실하게 객체화 가공 보장
+      const formattedSources = Array.isArray(data.sources)
+          ? data.sources.map((s: any) => ({ title: String(s.title || 'News Source'), url: String(s.url || '') }))
+          : [];
+
+      // 3. 완전히 가공 완료된 완제품을 데이터베이스에 적재 (Insert)
       const { error: insertError } = await supabase
       .from('baked_cookies')
       .insert({
@@ -199,11 +207,13 @@ export default function HomePage() {
         cookie_shape: cookieItem.shape,
         refined_query: cookieItem.text,
         result: data.result,
-        sources: data.sources
+        sources: formattedSources // 깔끔하게 정돈된 순수 데이터 주입
       });
 
       if (insertError) {
-        console.error('Failed to save baked cookie to history:', insertError);
+        // 인서트 에러 세부 로그 분석을 위해 에러 개체를 명확히 출력
+        console.error('🔥 [DB 적재 오류 세부로그]:', insertError);
+        throw insertError;
       }
 
       setIsTasting(false);
@@ -214,9 +224,9 @@ export default function HomePage() {
         detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }, 100);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error tasting cookie:', error);
-      alert('🍪 Insight baking failed. Your token has been safely preserved.');
+      alert(`🍪 Insight baking failed: ${error.message || 'Check Server Log'}`);
       setIsTasting(false);
     }
   };
@@ -265,26 +275,53 @@ export default function HomePage() {
         {(step === 'BAKING' || isTasting) && (
             <div className="fixed inset-0 bg-black/10 backdrop-blur-[1px] z-50 cursor-wait flex items-center justify-center select-none pointer-events-auto">
               <div className="bg-white/90 border-2 border-[#C68B59] px-6 py-4 rounded-2xl shadow-xl flex items-center gap-3 font-bold text-[#4E342E] animate-bounce">
-                <span>{step === 'BAKING' ? '🧁 Baking cookie...' : '🍴 맛있게 쿠키를 맛보는 중...'}</span>
+                <span>{step === 'BAKING' ? '🧁 Baking cookie...' : '🍴 Taste cookie...'}</span>
               </div>
             </div>
         )}
 
+        {/* 상단 프로필 헤더 바 */}
         <div className="w-full max-w-3xl flex justify-end items-center z-30 pt-2">
           {isLoggedIn ? (
-              <div className="flex items-center gap-3 animate-fade-in">
+              <div className="flex items-center gap-3 animate-fade-in relative" ref={dropdownRef}>
                 <div className="text-xs font-bold bg-[#EADCC9] px-3 py-1.5 rounded-full text-[#5D4037] select-none">
                   ⚡ Pantry: <span className="text-[#C68B59] font-black">{tokens}</span> EA
                 </div>
-                <div className="text-sm font-bold bg-[#F0E5D8] px-4 py-2 rounded-full border border-[#D7C4B1] text-[#A0522D] shadow-sm flex items-center gap-2">
+
+                {/* 🌟 드롭다운 메뉴 트리거 클릭 단추 */}
+                <button
+                    onClick={() => setIsDropdownOpen(!isDropdownOpen)}
+                    className="text-sm font-bold bg-[#F0E5D8] px-4 py-2 rounded-full border border-[#D7C4B1] text-[#A0522D] shadow-sm flex items-center gap-2 hover:bg-[#EADCC9] transition-all cursor-pointer"
+                >
                   <span>{userEmail.split('@')[0]} 🧑‍🍳</span>
-                  <button onClick={handleLogout} className="text-[11px] text-red-600 hover:underline font-normal ml-1">
-                    Logout
-                  </button>
-                </div>
+                  <span className="text-[10px] opacity-70">{isDropdownOpen ? '▲' : '▼'}</span>
+                </button>
+
+                {/* 🌟 사용자 드롭다운 팝업 리스트 */}
+                {isDropdownOpen && (
+                    <div className="absolute right-0 top-11 bg-white border-2 border-[#D7C4B1] rounded-xl shadow-xl py-2 w-44 z-50 animate-scale-up text-left">
+                      <Link
+                          href="/mypage"
+                          className="flex items-center gap-2 w-full px-4 py-2.5 text-xs font-black text-[#4E342E] hover:bg-[#FAF6F0] transition-colors"
+                          onClick={() => setIsDropdownOpen(false)}
+                      >
+                        🏺 My Cookie Jar
+                      </Link>
+                      <hr className="border-[#FAF6F0] my-1" />
+                      <button
+                          onClick={() => {
+                            setIsDropdownOpen(false);
+                            handleLogout();
+                          }}
+                          className="w-full text-left px-4 py-2.5 text-xs font-bold text-red-600 hover:bg-[#FAF6F0] transition-colors cursor-pointer"
+                      >
+                        Logout
+                      </button>
+                    </div>
+                )}
               </div>
           ) : (
-              <button onClick={() => setIsModalOpen(true)} className="text-sm font-medium opacity-80 hover:opacity-100 transition-opacity bg-[#F0E5D8] px-3 py-1.5 rounded-full border border-[#D7C4B1]">
+              <button onClick={() => setIsModalOpen(true)} className="text-sm font-medium opacity-80 hover:opacity-100 transition-opacity bg-[#F0E5D8] px-3 py-1.5 rounded-full border border-[#D7C4B1] cursor-pointer">
                 Hello unknown Baker 👤
               </button>
           )}
@@ -341,14 +378,13 @@ export default function HomePage() {
                             <p className="text-[14px] font-bold text-[#3E2723] leading-relaxed line-clamp-4 group-hover:line-clamp-none transition-all duration-300 px-1">{cookie.text}</p>
                           </div>
                         </div>
-                        <button onClick={() => handleSelectQuery(cookie)} className="w-full mt-6 bg-[#FAF6F0] group-hover:bg-[#C68B59] text-[#C68B59] group-hover:text-white border border-[#D7C4B1] group-hover:border-[#C68B59] font-black py-3 rounded-xl text-sm transition-all active:scale-[0.98] shadow-sm">
+                        <button onClick={() => handleSelectQuery(cookie)} className="w-full mt-6 bg-[#FAF6F0] group-hover:bg-[#C68B59] text-[#C68B59] group-hover:text-white border border-[#D7C4B1] group-hover:border-[#C68B59] font-black py-3 rounded-xl text-sm transition-all active:scale-[0.98] shadow-sm cursor-pointer">
                           Taste this Cookie 🍪
                         </button>
                       </div>
                   ))}
                 </div>
 
-                {/* 🌟 [수정] 스크롤 박스 및 마크다운 파싱이 적용된 디테일 뷰 영역 */}
                 <div
                     ref={detailRef}
                     className={`w-full overflow-hidden transition-all duration-500 ease-in-out ${selectedCookieText ? 'max-h-[700px] opacity-100 mt-6' : 'max-h-0 opacity-0'}`}
@@ -362,7 +398,6 @@ export default function HomePage() {
                       <span>🍽️</span> Baked Insight Analysis
                     </h4>
 
-                    {/* 🌟 마크다운 파싱 + 내부 스크롤뷰 장착 컨테이너 */}
                     <div className="text-sm bg-[#FAF6F0] text-[#3E2723] p-5 rounded-xl border border-[#D7C4B1] leading-relaxed max-h-[400px] overflow-y-auto font-sans prose prose-brown">
                       <ReactMarkdown>{selectedCookieText || ''}</ReactMarkdown>
                     </div>
@@ -390,7 +425,7 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                <button onClick={() => { setQuery(''); setStep('INPUT'); setSelectedCookieText(null); }} className="text-xs text-[#8D6E63] hover:underline text-center mt-2">
+                <button onClick={() => { setQuery(''); setStep('INPUT'); setSelectedCookieText(null); }} className="text-xs text-[#8D6E63] hover:underline text-center mt-2 cursor-pointer">
                   ← Back to Prep Bench
                 </button>
               </div>
@@ -404,6 +439,7 @@ export default function HomePage() {
           </a>
         </footer>
 
+        {/* ... (모달구조 동일) ... */}
         {isModalOpen && (
             <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="absolute inset-0" onClick={() => setIsModalOpen(false)} />
@@ -412,7 +448,7 @@ export default function HomePage() {
                   <h2 className="text-xl font-bold text-[#4E342E] mb-1">Start Baking!</h2>
                   <p className="text-xs text-[#8D6E63]">Please sign in to get 3 FREE starter tokens</p>
                 </div>
-                <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white text-gray-700 font-semibold py-3 px-4 border border-gray-300 rounded-xl shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all text-sm">
+                <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white text-gray-700 font-semibold py-3 px-4 border border-gray-300 rounded-xl shadow-sm hover:bg-gray-50 active:scale-[0.98] transition-all text-sm cursor-pointer">
                   <svg className="w-5 h-5" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                     <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -421,7 +457,7 @@ export default function HomePage() {
                   </svg>
                   <span>Login with Google</span>
                 </button>
-                <button onClick={() => setIsModalOpen(false)} className="text-xs text-[#8D6E63] hover:underline">Maybe later</button>
+                <button onClick={() => setIsModalOpen(false)} className="text-xs text-[#8D6E63] hover:underline cursor-pointer">Maybe later</button>
               </div>
             </div>
         )}
@@ -438,10 +474,10 @@ export default function HomePage() {
                     We are currently polishing additional features. Leave your feedback to help us grow!
                   </p>
                 </div>
-                <button onClick={handleWaitlistSubmit} disabled={hasVoted || isSubmitting} className={`w-full font-bold py-3 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-1 ${hasVoted ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#66BB6A] hover:bg-[#57A75B] text-white active:scale-[0.99]'}`}>
+                <button onClick={handleWaitlistSubmit} disabled={hasVoted || isSubmitting} className={`w-full font-bold py-3 px-4 rounded-xl text-xs transition-all flex items-center justify-center gap-1 ${hasVoted ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#66BB6A] hover:bg-[#57A75B] text-white active:scale-[0.99] cursor-pointer'}`}>
                   {isSubmitting ? <span>Submitting...</span> : hasVoted ? <span>✓ Already Submitted! Thanks!</span> : <span>I want more tokens! 👍</span>}
                 </button>
-                <button onClick={() => setIsWaitlistModalOpen(false)} className="text-xs text-[#8D6E63] hover:underline">Close</button>
+                <button onClick={() => setIsWaitlistModalOpen(false)} className="text-xs text-[#8D6E63] hover:underline cursor-pointer">Close</button>
               </div>
             </div>
         )}
