@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from "@/src/utils/supabase";
+import ReactMarkdown from 'react-markdown';
 
 type StepType = 'INPUT' | 'BAKING' | 'RESULTS';
 
@@ -35,9 +36,11 @@ export default function HomePage() {
   const [isTasting, setIsTasting] = useState(false);
   const detailRef = useRef<HTMLDivElement>(null);
 
-  const feedbackEmail = "micka.vocal@gmail.com";
+  const feedbackEmail = "edsolarrcnt5@gmail.com";
   const mailSubject = encodeURIComponent("[News Cookie] Feedback & Suggestions");
   const mailBody = encodeURIComponent("Hello Chef!\n\nHere is my feedback about News Cookie:\n\n");
+
+  const [sources, setSources] = useState<{ title: string; url: string }[]>([]);
 
   const shapeDesignMap = {
     SQUARE: {
@@ -156,7 +159,7 @@ export default function HomePage() {
     }
   };
 
-  const handleSelectQuery = async (refinedText: string) => {
+  const handleSelectQuery = async (cookieItem: CookieOption) => {
     if (tokens < 1) {
       setIsWaitlistModalOpen(true);
       return;
@@ -164,30 +167,56 @@ export default function HomePage() {
 
     setIsTasting(true);
     setSelectedCookieText(null);
+    setSources([]); // 이전 출처 UI 초기화
 
     try {
       const nextTokenCount = tokens - 1;
-      const { error } = await supabase
+      const { error: tokenError } = await supabase
       .from('users')
       .update({ cookie_token: nextTokenCount })
       .eq('id', userId);
 
-      if (error) throw error;
-
+      if (tokenError) throw tokenError;
       setTokens(nextTokenCount);
 
-      setTimeout(() => {
-        setIsTasting(false);
-        setSelectedCookieText(refinedText);
+      const response = await fetch('/api/taste', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refinedQuery: cookieItem.text }),
+      });
 
-        setTimeout(() => {
-          detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }, 100);
-      }, 1000);
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || 'Failed to fetch taste analysis');
+      }
+
+      const { error: insertError } = await supabase
+      .from('baked_cookies')
+      .insert({
+        user_id: userId,
+        query: query,
+        cookie_shape: cookieItem.shape,
+        refined_query: cookieItem.text,
+        result: data.result,
+        sources: data.sources
+      });
+
+      if (insertError) {
+        console.error('Failed to save baked cookie to history:', insertError);
+      }
+
+      setIsTasting(false);
+      setSelectedCookieText(data.result);
+      setSources(data.sources);
+
+      setTimeout(() => {
+        detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 100);
 
     } catch (error) {
-      console.error('Error deducting token:', error);
-      alert('Failed to consume token. Please try again.');
+      console.error('Error tasting cookie:', error);
+      alert('🍪 Insight baking failed. Your token has been safely preserved.');
       setIsTasting(false);
     }
   };
@@ -232,6 +261,15 @@ export default function HomePage() {
 
   return (
       <main className="min-h-screen bg-[#FAF6F0] text-[#3E2723] flex flex-col items-center justify-between font-sans p-6 relative transition-all duration-500">
+
+        {(step === 'BAKING' || isTasting) && (
+            <div className="fixed inset-0 bg-black/10 backdrop-blur-[1px] z-50 cursor-wait flex items-center justify-center select-none pointer-events-auto">
+              <div className="bg-white/90 border-2 border-[#C68B59] px-6 py-4 rounded-2xl shadow-xl flex items-center gap-3 font-bold text-[#4E342E] animate-bounce">
+                <span>{step === 'BAKING' ? '🧁 Baking cookie...' : '🍴 맛있게 쿠키를 맛보는 중...'}</span>
+              </div>
+            </div>
+        )}
+
         <div className="w-full max-w-3xl flex justify-end items-center z-30 pt-2">
           {isLoggedIn ? (
               <div className="flex items-center gap-3 animate-fade-in">
@@ -264,7 +302,7 @@ export default function HomePage() {
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onClick={handleInteraction}
-                    placeholder="What kind of cookie do you want to bake? Enter your query in your language..."
+                    placeholder="What kind of cookie do you want to bake? Enter your query..."
                     className="w-full px-5 py-4 rounded-xl bg-white border-2 border-[#D7C4B1] text-[#3E2723] placeholder-[#A1887F] focus:outline-none focus:border-[#C68B59] focus:ring-2 focus:ring-[#C68B59]/20 transition-all shadow-inner text-base"
                 />
                 <button onClick={handleBakeSubmit} className="w-full bg-[#C68B59] text-white font-bold py-4 rounded-xl hover:bg-[#B37A49] active:scale-[0.99] transition-all shadow-md">
@@ -288,62 +326,65 @@ export default function HomePage() {
                   <h3 className="text-2xl font-black text-[#4E342E] mt-0.5">Select one cookie shape to taste</h3>
                 </div>
 
-                {isTasting && (
-                    <div className="w-full py-4 bg-[#EADCC9]/30 rounded-xl text-sm font-medium text-[#5D4037] animate-pulse flex items-center justify-center gap-2">
-                      <span>🍪 Crunch, crunch... Tasting your selected cookie shape...</span>
-                    </div>
-                )}
-
-                {/*기존 grid 안의 버튼 구조를 업그레이드 */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
                   {cookies.map((cookie) => (
-                      <div
-                          key={cookie.id}
-                          className="bg-white border-2 border-[#D7C4B1] rounded-3xl p-6 flex flex-col justify-between items-center hover:border-[#C68B59] hover:bg-[#FFFDFB] transition-all shadow-sm hover:shadow-md group relative min-h-[380px]"
-                      >
-                        {/* 상단 쿠키 모양 영역 */}
+                      <div key={cookie.id} className="bg-white border-2 border-[#D7C4B1] rounded-3xl p-6 flex flex-col justify-between items-center hover:border-[#C68B59] hover:bg-[#FFFDFB] transition-all shadow-sm hover:shadow-md group relative min-h-[420px]">
                         <div className="w-full flex flex-col items-center flex-1">
-                          <div className="w-24 h-24 flex items-center justify-center relative mb-5">
+                          <div className="w-24 h-24 flex items-center justify-center relative mb-6">
                             <div className={`w-20 h-20 ${cookie.shapeClass} opacity-90 group-hover:scale-105 transition-transform duration-300 shadow-sm`} style={{ clipPath: cookie.clipPath }} />
                             <div className="absolute top-[35%] left-[35%] w-2 h-2 bg-[#3e1e11] rounded-full opacity-60" />
                             <div className="absolute top-[55%] left-[55%] w-2.5 h-2.5 bg-[#2c1308] rounded-full opacity-70" />
                             <div className="absolute top-[60%] left-[30%] w-2 h-2 bg-[#3e1e11] rounded-full opacity-60" />
                           </div>
-
-                          <div className="w-full text-center border-t border-[#FAF6F0] pt-4 flex flex-col gap-1">
-                            <span className="text-[10px] font-bold text-[#C68B59] uppercase">{cookie.shape} Option 0{cookie.id}</span>
-                            <p className="text-xm font-semibold text-[#3E2723] leading-relaxed line-clamp-4 group-hover:line-clamp-none transition-all duration-300">
-                              {cookie.text}
-                            </p>
+                          <div className="w-full text-center border-t border-[#FAF6F0] pt-5 flex flex-col gap-2">
+                            <span className="text-[11px] font-black text-[#C68B59] tracking-wider uppercase">{cookie.shape} Option 0{cookie.id}</span>
+                            <p className="text-[14px] font-bold text-[#3E2723] leading-relaxed line-clamp-4 group-hover:line-clamp-none transition-all duration-300 px-1">{cookie.text}</p>
                           </div>
                         </div>
-
-                        {/* 하단에 명확한 '맛보기/자세히보기' 단추 배치 */}
-                        <button
-                            disabled={isTasting}
-                            onClick={() => handleSelectQuery(cookie.text)}
-                            className="w-full mt-4 bg-[#FAF6F0] group-hover:bg-[#C68B59] text-[#C68B59] group-hover:text-white border border-[#D7C4B1] group-hover:border-[#C68B59] font-bold py-2 rounded-xl text-xs transition-all active:scale-[0.98] disabled:opacity-50"
-                        >
+                        <button onClick={() => handleSelectQuery(cookie)} className="w-full mt-6 bg-[#FAF6F0] group-hover:bg-[#C68B59] text-[#C68B59] group-hover:text-white border border-[#D7C4B1] group-hover:border-[#C68B59] font-black py-3 rounded-xl text-sm transition-all active:scale-[0.98] shadow-sm">
                           Taste this Cookie 🍪
                         </button>
                       </div>
                   ))}
                 </div>
+
+                {/* 🌟 [수정] 스크롤 박스 및 마크다운 파싱이 적용된 디테일 뷰 영역 */}
                 <div
                     ref={detailRef}
-                    className={`w-full overflow-hidden transition-all duration-500 ease-in-out ${selectedCookieText ? 'max-h-[500px] opacity-100 mt-4' : 'max-h-0 opacity-0'}`}
+                    className={`w-full overflow-hidden transition-all duration-500 ease-in-out ${selectedCookieText ? 'max-h-[700px] opacity-100 mt-6' : 'max-h-0 opacity-0'}`}
                 >
                   <div className="bg-white border-2 border-[#C68B59] rounded-2xl p-6 text-left shadow-lg relative bg-[radial-gradient(#FAF6F0_1px,transparent_1px)] [background-size:16px_16px]">
-                    <div className="absolute top-3 right-3 bg-[#C68B59] text-white font-bold text-[10px] px-2 py-0.5 rounded">
-                      TASTED 🍪
+                    <div className="absolute top-4 right-4 bg-[#66BB6A] text-white font-black text-[10px] px-2 py-1 rounded shadow-sm tracking-wider">
+                      FULLY BAKED 🍪
                     </div>
-                    <h4 className="font-extrabold text-[#4E342E] text-base mb-2 flex items-center gap-1.5">
-                      <span>🍽️</span> Full Baked Insight Prompt
+
+                    <h4 className="font-black text-[#4E342E] text-lg mb-4 flex items-center gap-2 border-b border-[#FAF6F0] pb-2">
+                      <span>🍽️</span> Baked Insight Analysis
                     </h4>
-                    <p className="text-sm bg-[#FAF6F0] text-[#3E2723] p-4 rounded-xl border border-[#D7C4B1] leading-relaxed font-mono whitespace-pre-wrap">
-                      {selectedCookieText}
-                    </p>
-                    <p className="text-[11px] text-[#8D6E63] mt-3 italic text-right">
+
+                    {/* 🌟 마크다운 파싱 + 내부 스크롤뷰 장착 컨테이너 */}
+                    <div className="text-sm bg-[#FAF6F0] text-[#3E2723] p-5 rounded-xl border border-[#D7C4B1] leading-relaxed max-h-[400px] overflow-y-auto font-sans prose prose-brown">
+                      <ReactMarkdown>{selectedCookieText || ''}</ReactMarkdown>
+                    </div>
+
+                    {sources.length > 0 && (
+                        <div className="mt-5 pt-4 border-t border-[#EADCC9]">
+                          <h5 className="text-xs font-black text-[#C68B59] tracking-wider uppercase mb-2 flex items-center gap-1">
+                            <span>🔗</span> Verified News Sources
+                          </h5>
+                          <ul className="flex flex-col gap-1.5">
+                            {sources.map((source, idx) => (
+                                <li key={idx} className="text-xs">
+                                  <a href={source.url} target="_blank" rel="noopener noreferrer" className="text-[#8D6E63] hover:text-[#C68B59] font-bold underline underline-offset-2 transition-colors break-all">
+                                    • [{idx + 1}] {source.title}
+                                  </a>
+                                </li>
+                            ))}
+                          </ul>
+                        </div>
+                    )}
+
+                    <p className="text-[11px] text-[#8D6E63] mt-4 italic text-right font-medium">
                       * 1 Token has been securely deducted from your Pantry.
                     </p>
                   </div>
@@ -363,7 +404,6 @@ export default function HomePage() {
           </a>
         </footer>
 
-        {/* ... (로그인 및 웨이트리스 모달) ... */}
         {isModalOpen && (
             <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="absolute inset-0" onClick={() => setIsModalOpen(false)} />
