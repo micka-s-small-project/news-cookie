@@ -1,9 +1,17 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from "@/src/utils/supabase";
 
 type StepType = 'INPUT' | 'BAKING' | 'RESULTS';
+
+interface CookieOption {
+  id: number;
+  shape: 'SQUARE' | 'CIRCLE' | 'HEXAGON'; // API 명세와 일치시킴
+  shapeClass: string;
+  clipPath: string;
+  text: string;
+}
 
 export default function HomePage() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -13,17 +21,39 @@ export default function HomePage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
 
   const [step, setStep] = useState<StepType>('INPUT');
-  const [tokens, setTokens] = useState(0); // number 타입
+  const [tokens, setTokens] = useState(0);
   const [isWaitlistModalOpen, setIsWaitlistModalOpen] = useState(false);
 
   const [hasVoted, setHasVoted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // 🌟 Gemini API로부터 받아온 3가지 쿠키 옵션을 저장할 상태
+  const [cookies, setCookies] = useState<CookieOption[]>([]);
+
+  // 선택된 쿠키의 상세 결과를 보여줄 상태들
+  const [selectedCookieText, setSelectedCookieText] = useState<string | null>(null);
+  const [isTasting, setIsTasting] = useState(false);
+  const detailRef = useRef<HTMLDivElement>(null);
+
   const feedbackEmail = "micka.vocal@gmail.com";
   const mailSubject = encodeURIComponent("[News Cookie] Feedback & Suggestions");
   const mailBody = encodeURIComponent("Hello Chef!\n\nHere is my feedback about News Cookie:\n\n");
 
-  // 토큰 가져오는 함수 수정
+  const shapeDesignMap = {
+    SQUARE: {
+      shapeClass: "bg-[#8D6E63]",
+      clipPath: "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)", // 오각형 스퀘어 느낌
+    },
+    CIRCLE: {
+      shapeClass: "bg-[#C68B59]",
+      clipPath: "circle(50% at 50% 50%)",
+    },
+    HEXAGON: {
+      shapeClass: "bg-[#D7A15C]",
+      clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
+    }
+  };
+
   const fetchUserTokens = async (uid: string) => {
     try {
       const { data, error } = await supabase
@@ -33,10 +63,8 @@ export default function HomePage() {
       .single();
 
       if (error) throw error;
-
       if (data) {
-        const tokenCount = data.cookie_token ? Number(data.cookie_token) : 0;
-        setTokens(tokenCount);
+        setTokens(data.cookie_token ? Number(data.cookie_token) : 0);
       }
     } catch (error) {
       console.error('Error fetching user tokens:', error);
@@ -46,21 +74,17 @@ export default function HomePage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const voted = localStorage.getItem('news_cookie_voted_waitlist');
-      if (voted === 'true') {
-        setHasVoted(true);
-      }
+      if (voted === 'true') setHasVoted(true);
     }
   }, []);
 
-  // 하나의 useEffect로 인증 상태 및 토큰 조회 통합 관리
   useEffect(() => {
-    // 초기 세션 확인
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         setIsLoggedIn(true);
         setUserEmail(session.user.email || '');
         setUserId(session.user.id);
-        fetchUserTokens(session.user.id); // 로그인 정보가 있다면 즉시 DB 값 조회
+        fetchUserTokens(session.user.id);
       }
     });
 
@@ -69,26 +93,19 @@ export default function HomePage() {
         setIsLoggedIn(true);
         setUserEmail(session.user.email || '');
         setUserId(session.user.id);
-        fetchUserTokens(session.user.id); // 상태가 바뀔 때도 DB 동기화
+        fetchUserTokens(session.user.id);
       } else {
         setIsLoggedIn(false);
         setUserEmail('');
         setUserId('');
         setTokens(0);
         setStep('INPUT');
+        setSelectedCookieText(null);
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
-
-  // ⚠️ [삭제됨] 하드코딩으로 setTokens(3) 하던 두 번째 useEffect 제거
-
-  const mockRefinedCookies = [
-    { id: 1, shapeClass: "bg-[#8D6E63]", clipPath: "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)", text: "🔍 Analyze the core impact of recent tech changes with a timeline." },
-    { id: 2, shapeClass: "bg-[#C68B59]", clipPath: "circle(50% at 50% 50%)", text: "💡 Summarize the industry pros and cons in a simple 3-line breakdown." },
-    { id: 3, shapeClass: "bg-[#D7A15C]", clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)", text: "📊 Extract visual statistics and data points from this trend." }
-  ];
 
   const handleInteraction = () => {
     if (!isLoggedIn) {
@@ -98,32 +115,88 @@ export default function HomePage() {
     return true;
   };
 
-  const handleBakeSubmit = () => {
+  // 🌟 [수정] 진짜 Gemini API 오븐을 호출하는 로직
+  const handleBakeSubmit = async () => {
     if (!handleInteraction()) return;
     if (!query.trim()) return;
 
     setStep('BAKING');
-    setTimeout(() => {
+    setSelectedCookieText(null);
+
+    try {
+      const response = await fetch('/api/bake', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || 'Failed to bake cookies');
+      }
+
+      const bakedCookies: CookieOption[] = result.data.map((item: any) => {
+        const design = shapeDesignMap[item.shape as 'SQUARE' | 'CIRCLE' | 'HEXAGON'] || shapeDesignMap.CIRCLE;
+        return {
+          id: item.id,
+          shape: item.shape,
+          text: item.text,
+          ...design
+        };
+      });
+
+      setCookies(bakedCookies);
       setStep('RESULTS');
-    }, 1500);
+
+    } catch (error) {
+      console.error('Baking error:', error);
+      alert('🍪 Oh no! The oven overheated. Please try baking again.');
+      setStep('INPUT');
+    }
   };
 
-  const handleSelectQuery = (refinedText: string) => {
-    if (tokens >= 1) {
-      setTokens((prev) => prev - 1);
-      alert(`🍪 [1 Token Used!] Opening result for:\n"${refinedText}"`);
-    } else {
+  const handleSelectQuery = async (refinedText: string) => {
+    if (tokens < 1) {
       setIsWaitlistModalOpen(true);
+      return;
+    }
+
+    setIsTasting(true);
+    setSelectedCookieText(null);
+
+    try {
+      const nextTokenCount = tokens - 1;
+      const { error } = await supabase
+      .from('users')
+      .update({ cookie_token: nextTokenCount })
+      .eq('id', userId);
+
+      if (error) throw error;
+
+      setTokens(nextTokenCount);
+
+      setTimeout(() => {
+        setIsTasting(false);
+        setSelectedCookieText(refinedText);
+
+        setTimeout(() => {
+          detailRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }, 100);
+      }, 1000);
+
+    } catch (error) {
+      console.error('Error deducting token:', error);
+      alert('Failed to consume token. Please try again.');
+      setIsTasting(false);
     }
   };
 
   const handleWaitlistSubmit = async () => {
     if (hasVoted || isSubmitting) return;
     setIsSubmitting(true);
-
     try {
       await new Promise((resolve) => setTimeout(resolve, 600));
-
       localStorage.setItem('news_cookie_voted_waitlist', 'true');
       setHasVoted(true);
       alert("💖 Thank you for voting! Your interest speeds up our official launch.");
@@ -158,7 +231,7 @@ export default function HomePage() {
   };
 
   return (
-      <main className="min-h-screen bg-[#FAF6F0] text-[#3E2723] flex flex-col items-center justify-between font-sans p-6 relative">
+      <main className="min-h-screen bg-[#FAF6F0] text-[#3E2723] flex flex-col items-center justify-between font-sans p-6 relative transition-all duration-500">
         <div className="w-full max-w-3xl flex justify-end items-center z-30 pt-2">
           {isLoggedIn ? (
               <div className="flex items-center gap-3 animate-fade-in">
@@ -191,7 +264,7 @@ export default function HomePage() {
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onClick={handleInteraction}
-                    placeholder="What kind of cookie do you want to bake? Enter your query..."
+                    placeholder="What kind of cookie do you want to bake? Enter your query in your language..."
                     className="w-full px-5 py-4 rounded-xl bg-white border-2 border-[#D7C4B1] text-[#3E2723] placeholder-[#A1887F] focus:outline-none focus:border-[#C68B59] focus:ring-2 focus:ring-[#C68B59]/20 transition-all shadow-inner text-base"
                 />
                 <button onClick={handleBakeSubmit} className="w-full bg-[#C68B59] text-white font-bold py-4 rounded-xl hover:bg-[#B37A49] active:scale-[0.99] transition-all shadow-md">
@@ -204,7 +277,7 @@ export default function HomePage() {
               <div className="py-6 text-center space-y-4 animate-pulse">
                 <span className="text-5xl inline-block animate-spin duration-1000">⏳</span>
                 <h2 className="text-xl font-bold text-[#4E342E]">Baking your query into cookies...</h2>
-                <p className="text-xs text-[#8D6E63]">Formulating 3 refined option shapes from LLM oven.</p>
+                <p className="text-xs text-[#8D6E63]">Formulating 3 refined option shapes from Gemini oven.</p>
               </div>
           )}
 
@@ -215,24 +288,68 @@ export default function HomePage() {
                   <h3 className="text-2xl font-black text-[#4E342E] mt-0.5">Select one cookie shape to taste</h3>
                 </div>
 
+                {isTasting && (
+                    <div className="w-full py-4 bg-[#EADCC9]/30 rounded-xl text-sm font-medium text-[#5D4037] animate-pulse flex items-center justify-center gap-2">
+                      <span>🍪 Crunch, crunch... Tasting your selected cookie shape...</span>
+                    </div>
+                )}
+
+                {/*기존 grid 안의 버튼 구조를 업그레이드 */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
-                  {mockRefinedCookies.map((cookie, index) => (
-                      <button key={cookie.id} onClick={() => handleSelectQuery(cookie.text)} className="bg-white border-2 border-[#D7C4B1] rounded-3xl p-6 flex flex-col items-center hover:border-[#C68B59] hover:bg-[#FFFDFB] transition-all active:scale-[0.98] shadow-sm hover:shadow-md group">
-                        <div className="w-24 h-24 flex items-center justify-center relative mb-6">
-                          <div className={`w-20 h-20 ${cookie.shapeClass} opacity-90 group-hover:scale-105 transition-transform duration-300 shadow-sm`} style={{ clipPath: cookie.clipPath }} />
-                          <div className="absolute top-[35%] left-[35%] w-2 h-2 bg-[#3e1e11] rounded-full opacity-60" />
-                          <div className="absolute top-[55%] left-[55%] w-2.5 h-2.5 bg-[#2c1308] rounded-full opacity-70" />
-                          <div className="absolute top-[60%] left-[30%] w-2 h-2 bg-[#3e1e11] rounded-full opacity-60" />
+                  {cookies.map((cookie) => (
+                      <div
+                          key={cookie.id}
+                          className="bg-white border-2 border-[#D7C4B1] rounded-3xl p-6 flex flex-col justify-between items-center hover:border-[#C68B59] hover:bg-[#FFFDFB] transition-all shadow-sm hover:shadow-md group relative min-h-[380px]"
+                      >
+                        {/* 상단 쿠키 모양 영역 */}
+                        <div className="w-full flex flex-col items-center flex-1">
+                          <div className="w-24 h-24 flex items-center justify-center relative mb-5">
+                            <div className={`w-20 h-20 ${cookie.shapeClass} opacity-90 group-hover:scale-105 transition-transform duration-300 shadow-sm`} style={{ clipPath: cookie.clipPath }} />
+                            <div className="absolute top-[35%] left-[35%] w-2 h-2 bg-[#3e1e11] rounded-full opacity-60" />
+                            <div className="absolute top-[55%] left-[55%] w-2.5 h-2.5 bg-[#2c1308] rounded-full opacity-70" />
+                            <div className="absolute top-[60%] left-[30%] w-2 h-2 bg-[#3e1e11] rounded-full opacity-60" />
+                          </div>
+
+                          <div className="w-full text-center border-t border-[#FAF6F0] pt-4 flex flex-col gap-1">
+                            <span className="text-[10px] font-bold text-[#C68B59] uppercase">{cookie.shape} Option 0{cookie.id}</span>
+                            <p className="text-xm font-semibold text-[#3E2723] leading-relaxed line-clamp-4 group-hover:line-clamp-none transition-all duration-300">
+                              {cookie.text}
+                            </p>
+                          </div>
                         </div>
-                        <div className="w-full text-center border-t border-[#FAF6F0] pt-4 flex flex-col gap-1">
-                          <span className="text-[10px] font-bold text-[#C68B59] uppercase">Shape Option 0{index + 1}</span>
-                          <p className="text-xs font-semibold text-[#3E2723] leading-relaxed line-clamp-3">{cookie.text}</p>
-                        </div>
-                      </button>
+
+                        {/* 하단에 명확한 '맛보기/자세히보기' 단추 배치 */}
+                        <button
+                            disabled={isTasting}
+                            onClick={() => handleSelectQuery(cookie.text)}
+                            className="w-full mt-4 bg-[#FAF6F0] group-hover:bg-[#C68B59] text-[#C68B59] group-hover:text-white border border-[#D7C4B1] group-hover:border-[#C68B59] font-bold py-2 rounded-xl text-xs transition-all active:scale-[0.98] disabled:opacity-50"
+                        >
+                          Taste this Cookie 🍪
+                        </button>
+                      </div>
                   ))}
                 </div>
+                <div
+                    ref={detailRef}
+                    className={`w-full overflow-hidden transition-all duration-500 ease-in-out ${selectedCookieText ? 'max-h-[500px] opacity-100 mt-4' : 'max-h-0 opacity-0'}`}
+                >
+                  <div className="bg-white border-2 border-[#C68B59] rounded-2xl p-6 text-left shadow-lg relative bg-[radial-gradient(#FAF6F0_1px,transparent_1px)] [background-size:16px_16px]">
+                    <div className="absolute top-3 right-3 bg-[#C68B59] text-white font-bold text-[10px] px-2 py-0.5 rounded">
+                      TASTED 🍪
+                    </div>
+                    <h4 className="font-extrabold text-[#4E342E] text-base mb-2 flex items-center gap-1.5">
+                      <span>🍽️</span> Full Baked Insight Prompt
+                    </h4>
+                    <p className="text-sm bg-[#FAF6F0] text-[#3E2723] p-4 rounded-xl border border-[#D7C4B1] leading-relaxed font-mono whitespace-pre-wrap">
+                      {selectedCookieText}
+                    </p>
+                    <p className="text-[11px] text-[#8D6E63] mt-3 italic text-right">
+                      * 1 Token has been securely deducted from your Pantry.
+                    </p>
+                  </div>
+                </div>
 
-                <button onClick={() => { setQuery(''); setStep('INPUT'); }} className="text-xs text-[#8D6E63] hover:underline text-center mt-2">
+                <button onClick={() => { setQuery(''); setStep('INPUT'); setSelectedCookieText(null); }} className="text-xs text-[#8D6E63] hover:underline text-center mt-2">
                   ← Back to Prep Bench
                 </button>
               </div>
@@ -246,6 +363,7 @@ export default function HomePage() {
           </a>
         </footer>
 
+        {/* ... (로그인 및 웨이트리스 모달) ... */}
         {isModalOpen && (
             <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
               <div className="absolute inset-0" onClick={() => setIsModalOpen(false)} />
