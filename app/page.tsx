@@ -43,6 +43,7 @@ export default function HomePage() {
   const mailBody = encodeURIComponent("Hello Chef!\n\nHere is my feedback about News Cookie:\n\n");
 
   const [sources, setSources] = useState<{ title: string; url: string }[]>([]);
+  const [isShared, setIsShared] = useState(false);
 
   const shapeDesignMap = {
     SQUARE: { shapeClass: "bg-[#8D6E63]", clipPath: "polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)" },
@@ -60,6 +61,35 @@ export default function HomePage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  const handleShareReport = async () => {
+    if (!selectedCookieText) return;
+
+    const shareTitle = `🍪 News Cookie Report: "${query}"`;
+    const shareText = `Check out this amazing insight report baked with AI!\n\n📌 Query: ${query}\n📝 Full analysis is waiting for you at News Cookie.`;
+    const shareUrl = typeof window !== 'undefined' ? window.location.origin : '';
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: shareTitle,
+          text: shareText,
+          url: shareUrl,
+        });
+      } catch (error) {
+        console.error('Error sharing report:', error);
+      }
+    } else {
+      // 내장 Share API 미지원 브라우저 (데스크톱 등)인 경우 클립보드 복사 처리
+      try {
+        await navigator.clipboard.writeText(`${shareTitle}\n\n${shareText}\n\n🔗 Join Oven Room: ${shareUrl}`);
+        setIsShared(true);
+        setTimeout(() => setIsShared(false), 2000); // 2초 후 원상복구
+      } catch (err) {
+        console.error('Failed to copy text: ', err);
+      }
+    }
+  };
 
   const fetchUserTokens = async (uid: string) => {
     try {
@@ -234,14 +264,25 @@ export default function HomePage() {
   const handleWaitlistSubmit = async () => {
     if (hasVoted || isSubmitting) return;
     setIsSubmitting(true);
+
     try {
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      // Supabase wait_list 테이블에 현재 유저 정보 안전하게 적재
+      const { error } = await supabase
+      .from('wait_list')
+      .insert({
+        user_id: userId,
+        email: userEmail
+      });
+
+      if (error) throw error;
+
       localStorage.setItem('news_cookie_voted_waitlist', 'true');
       setHasVoted(true);
-      alert("💖 Thank you for voting! Your interest speeds up our official launch.");
+      alert("💖 Thank you for joining our waitlist! Your interest speeds up our official launch.");
       setIsWaitlistModalOpen(false);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error('Error joining waitlist:', e);
+      alert(`🍪 Failed to join waitlist: ${e.message || 'Please check DB connectivity.'}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -387,7 +428,7 @@ export default function HomePage() {
 
                 <div
                     ref={detailRef}
-                    className={`w-full overflow-hidden transition-all duration-500 ease-in-out ${selectedCookieText ? 'max-h-[700px] opacity-100 mt-6' : 'max-h-0 opacity-0'}`}
+                    className={`w-full overflow-hidden transition-all duration-500 ease-in-out ${selectedCookieText ? 'max-h-max opacity-100 mt-6' : 'max-h-0 opacity-0'}`}
                 >
                   <div className="bg-white border-2 border-[#C68B59] rounded-2xl p-6 text-left shadow-lg relative bg-[radial-gradient(#FAF6F0_1px,transparent_1px)] [background-size:16px_16px]">
                     <div className="absolute top-4 right-4 bg-[#66BB6A] text-white font-black text-[10px] px-2 py-1 rounded shadow-sm tracking-wider">
@@ -418,6 +459,15 @@ export default function HomePage() {
                           </ul>
                         </div>
                     )}
+
+                    <div className="mt-5 pt-3 border-t border-[#FAF6F0] flex justify-end">
+                      <button
+                          onClick={handleShareReport}
+                          className="text-xs font-black bg-[#C68B59] hover:bg-[#B37A49] text-white px-4 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                      >
+                        <span>🔗</span> {isShared ? 'Copied! ✅' : 'Share Report'}
+                      </button>
+                    </div>
 
                     <p className="text-[11px] text-[#8D6E63] mt-4 italic text-right font-medium">
                       * 1 Token has been securely deducted from your Pantry.
