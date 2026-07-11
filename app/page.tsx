@@ -33,6 +33,8 @@ export default function HomePage() {
   const [selectedCookieText, setSelectedCookieText] = useState<string | null>(null);
   const [isTasting, setIsTasting] = useState(false);
   const detailRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const searchSectionRef = useRef<HTMLElement>(null);
 
   // 🌟 마이페이지 이동 드롭다운 토글 및 참조 상태 추가
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -50,6 +52,42 @@ export default function HomePage() {
     CIRCLE: { shapeClass: "bg-[#C68B59]", clipPath: "circle(50% at 50% 50%)" },
     HEXAGON: { shapeClass: "bg-[#D7A15C]", clipPath: "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)" }
   };
+
+  const howItWorksSteps = [
+    {
+      title: '1. Enter a keyword',
+      text: 'Type a topic such as AI, real estate, or pop culture and start from there.',
+    },
+    {
+      title: '2. Choose 3 cookie directions',
+      text: 'AI suggests three different ways to explore the same topic from distinct angles.',
+    },
+    {
+      title: '3. Review the insight',
+      text: 'The selected angle is turned into a concise summary with supporting references.',
+    },
+  ];
+
+  const cookieTypes = [
+    {
+      title: 'Flow Cookie',
+      text: 'How did this issue begin, and where is it heading?',
+      shapeClass: 'bg-[#8D6E63]',
+      clipPath: 'polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)',
+    },
+    {
+      title: 'Trend Cookie',
+      text: 'What is the hottest topic or debate right now?',
+      shapeClass: 'bg-[#C68B59]',
+      clipPath: 'circle(50% at 50% 50%)',
+    },
+    {
+      title: 'Data Cookie',
+      text: 'How do numbers, trends, and reactions change the story?',
+      shapeClass: 'bg-[#D7A15C]',
+      clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)',
+    },
+  ];
 
   // 외부 영역 클릭 시 유저 드롭다운 메뉴 닫기 트리거
   useEffect(() => {
@@ -151,6 +189,14 @@ export default function HomePage() {
       return false;
     }
     return true;
+  };
+
+  const handleJumpToSearch = () => {
+    searchSectionRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+    setTimeout(() => inputRef.current?.focus(), 400);
   };
 
   const handleBakeSubmit = async () => {
@@ -311,7 +357,7 @@ export default function HomePage() {
   };
 
   return (
-      <main className="min-h-screen bg-[#FAF6F0] text-[#3E2723] flex flex-col items-center justify-between font-sans p-6 relative transition-all duration-500">
+      <main className="min-h-screen bg-[#FAF6F0] text-[#3E2723] flex flex-col items-center justify-between font-sans px-6 pb-6 pt-8 relative transition-all duration-500">
 
         {(step === 'BAKING' || isTasting) && (
             <div className="fixed inset-0 bg-black/10 backdrop-blur-[1px] z-50 cursor-wait flex items-center justify-center select-none pointer-events-auto">
@@ -321,15 +367,17 @@ export default function HomePage() {
             </div>
         )}
 
-        {/* 상단 프로필 헤더 바 */}
-        <div className="w-full max-w-3xl flex justify-end items-center z-30 pt-2">
+        <div className="w-full max-w-6xl flex items-center justify-between z-30 pt-2 pb-8">
+          <div className="text-3xl font-black tracking-tight text-[#4E342E] sm:text-4xl">
+            News <span className="text-[#C68B59]">Cookie</span>
+          </div>
+
           {isLoggedIn ? (
               <div className="flex items-center gap-3 animate-fade-in relative" ref={dropdownRef}>
                 <div className="text-xs font-bold bg-[#EADCC9] px-3 py-1.5 rounded-full text-[#5D4037] select-none">
                   ⚡ Pantry: <span className="text-[#C68B59] font-black">{tokens}</span> EA
                 </div>
 
-                {/* 🌟 드롭다운 메뉴 트리거 클릭 단추 */}
                 <button
                     onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                     className="text-sm font-bold bg-[#F0E5D8] px-4 py-2 rounded-full border border-[#D7C4B1] text-[#A0522D] shadow-sm flex items-center gap-2 hover:bg-[#EADCC9] transition-all cursor-pointer"
@@ -338,7 +386,6 @@ export default function HomePage() {
                   <span className="text-[10px] opacity-70">{isDropdownOpen ? '▲' : '▼'}</span>
                 </button>
 
-                {/* 🌟 사용자 드롭다운 팝업 리스트 */}
                 {isDropdownOpen && (
                     <div className="absolute right-0 top-11 bg-white border-2 border-[#D7C4B1] rounded-xl shadow-xl py-2 w-44 z-50 animate-scale-up text-left">
                       <Link
@@ -368,25 +415,118 @@ export default function HomePage() {
           )}
         </div>
 
-        <div className={`w-full text-center flex flex-col items-center gap-8 relative z-0 my-auto transition-all duration-300 ${step === 'RESULTS' ? 'max-w-3xl' : 'max-w-md'}`}>
-          <h1 className="text-6xl font-extrabold tracking-tight select-none drop-shadow-sm text-[#4E342E]">
-            News <span className="text-[#C68B59]">Cookie</span>
-          </h1>
-
+        <div className={`w-full flex flex-col items-center gap-8 relative z-0 my-auto transition-all duration-300 ${step === 'RESULTS' ? 'max-w-3xl' : 'max-w-5xl'}`}>
           {step === 'INPUT' && (
-              <div className="w-full flex flex-col gap-3 animate-fade-in">
-                <input
-                    type="text"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onClick={handleInteraction}
-                    placeholder="What kind of cookie do you want to bake? Enter your query..."
-                    className="w-full px-5 py-4 rounded-xl bg-white border-2 border-[#D7C4B1] text-[#3E2723] placeholder-[#A1887F] focus:outline-none focus:border-[#C68B59] focus:ring-2 focus:ring-[#C68B59]/20 transition-all shadow-inner text-base"
-                />
-                <button onClick={handleBakeSubmit} className="w-full bg-[#C68B59] text-white font-bold py-4 rounded-xl hover:bg-[#B37A49] active:scale-[0.99] transition-all shadow-md">
-                  Bake your Cookie 🍪
-                </button>
-              </div>
+              <>
+                <section className="mt-2 w-full rounded-[2rem] border border-[#E8D9C6] bg-white/80 p-6 shadow-[0_20px_60px_rgba(62,39,35,0.08)] backdrop-blur sm:p-8 text-center">
+                  <div className="mx-auto flex max-w-3xl flex-col items-center space-y-4">
+                    <div className="inline-flex rounded-full border border-[#E5C8A4] bg-[#F7E9D8] px-3 py-1 text-sm font-semibold text-[#8B5E3C]">
+                      News research, now starting with smarter questions
+                    </div>
+                    <h2 className="text-3xl font-black leading-tight text-[#4E342E] sm:text-4xl">
+                      Put in a search term, choose what to explore next, and get grounded news insights.
+                    </h2>
+                    <p className="max-w-3xl text-base leading-8 text-[#6F4E37] sm:text-lg">
+                      When you enter a keyword, News Cookie helps turn it into a sharper research question, suggests three directions to explore, and turns the selected angle into a concise summary with useful references.
+                    </p>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                      <button
+                        onClick={handleJumpToSearch}
+                        className="rounded-2xl bg-[#C68B59] px-5 py-3 text-center font-semibold text-white transition hover:bg-[#B37A49]"
+                      >
+                        Bake your News Cookie
+                      </button>
+                      <p className="text-sm text-[#8D6E63]">Get 3 free cookies after sign-up</p>
+                    </div>
+                  </div>
+                </section>
+
+                <section ref={searchSectionRef} className="w-full scroll-mt-24 rounded-[2rem] border border-[#E8D9C6] bg-[#FAF6F0] p-5 shadow-sm sm:p-6">
+                  <div className="mx-auto flex max-w-3xl flex-col gap-3">
+                    <input
+                        ref={inputRef}
+                        type="text"
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        onClick={handleInteraction}
+                        placeholder="What kind of cookie do you want to bake? Enter your query..."
+                        className="w-full px-5 py-4 rounded-xl bg-white border-2 border-[#D7C4B1] text-[#3E2723] placeholder-[#A1887F] focus:outline-none focus:border-[#C68B59] focus:ring-2 focus:ring-[#C68B59]/20 transition-all shadow-inner text-base"
+                    />
+                    <button onClick={handleBakeSubmit} className="w-full bg-[#C68B59] text-white font-bold py-4 rounded-xl hover:bg-[#B37A49] active:scale-[0.99] transition-all shadow-md">
+                      Bake your Cookie 🍪
+                    </button>
+                  </div>
+                </section>
+
+                <section className="w-full rounded-[2rem] border border-[#E8D9C6] bg-[#FAF6F0] p-6 shadow-sm sm:p-8 text-center">
+                  <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
+                    <h3 className="text-2xl font-black text-[#4E342E]">News is everywhere, but it is hard to know where to look first.</h3>
+                    <p className="mt-3 max-w-2xl text-base leading-8 text-[#6F4E37]">
+                      Short searches often lead to scattered results. Articles can feel informative on their own, but it takes time to connect the dots and understand the bigger picture. News Cookie helps you begin with a better question.
+                    </p>
+                  </div>
+                </section>
+
+                <section className="w-full rounded-[2rem] border border-[#E8D9C6] bg-white/80 p-6 shadow-[0_20px_60px_rgba(62,39,35,0.08)] backdrop-blur sm:p-8 text-center">
+                  <div className="mx-auto flex max-w-3xl flex-col items-center text-center">
+                    <h3 className="text-2xl font-black text-[#4E342E]">How it works</h3>
+                    <div className="mt-6 grid w-full gap-4 lg:grid-cols-3">
+                      {howItWorksSteps.map((step) => (
+                        <div key={step.title} className="rounded-[1.25rem] border border-[#E7D7C4] bg-[#FFF9F2] p-4 text-center">
+                          <h4 className="text-base font-black text-[#4E342E]">{step.title}</h4>
+                          <p className="mt-2 text-sm leading-7 text-[#6F4E37]">{step.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="w-full rounded-[2rem] border border-[#E8D9C6] bg-[#FAF6F0] p-6 shadow-sm sm:p-8 text-center">
+                  <div className="mx-auto max-w-4xl">
+                    <h3 className="text-2xl font-black text-[#4E342E]">Three cookie directions to explore</h3>
+                    <div className="mt-6 grid gap-4 lg:grid-cols-3">
+                      {cookieTypes.map((cookie) => (
+                        <div key={cookie.title} className="rounded-[1.4rem] border border-[#E7D7C4] bg-white p-4 text-center">
+                          <div className="mb-4 flex items-center justify-center">
+                            <div className={`h-14 w-14 ${cookie.shapeClass}`} style={{ clipPath: cookie.clipPath }} />
+                          </div>
+                          <h4 className="text-base font-black text-[#4E342E]">{cookie.title}</h4>
+                          <p className="mt-2 text-sm leading-7 text-[#6F4E37]">{cookie.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="w-full rounded-[2rem] border border-[#E8D9C6] bg-white/80 p-6 shadow-[0_20px_60px_rgba(62,39,35,0.08)] backdrop-blur sm:p-8 text-center">
+                  <div className="mx-auto flex max-w-3xl flex-col items-center">
+                    <h3 className="text-2xl font-black text-[#4E342E]">Grounded insights, not just summaries</h3>
+                    <p className="mt-3 text-base leading-8 text-[#6F4E37]">
+                      News Cookie builds insights from recent news content and shows the references used to support the result. This tool is not intended as professional advice for investment, medical, or legal decisions.
+                    </p>
+                  </div>
+                </section>
+
+                <section className="w-full rounded-[2rem] border border-[#E8D9C6] bg-[#FAF6F0] p-6 shadow-sm sm:p-8 text-center">
+                  <div className="mx-auto flex max-w-3xl flex-col items-center">
+                    <h3 className="text-2xl font-black text-[#4E342E]">Come back to the cookies you baked</h3>
+                    <p className="mt-3 text-base leading-8 text-[#6F4E37]">
+                      Your previous searches, chosen directions, and analysis results can be revisited anytime from My Cookie Jar.
+                    </p>
+                  </div>
+                </section>
+
+                <section className="w-full rounded-[2rem] border border-[#E8D9C6] bg-white/80 p-6 shadow-[0_20px_60px_rgba(62,39,35,0.08)] backdrop-blur sm:p-8 text-center">
+                  <div className="mx-auto flex max-w-3xl flex-col items-center">
+                    <button
+                      onClick={handleJumpToSearch}
+                      className="rounded-2xl bg-[#C68B59] px-6 py-3 text-lg font-black text-white transition hover:bg-[#B37A49]"
+                    >
+                      Try it right now!!
+                    </button>
+                  </div>
+                </section>
+              </>
           )}
 
           {step === 'BAKING' && (
